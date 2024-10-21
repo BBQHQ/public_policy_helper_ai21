@@ -1,73 +1,25 @@
 import streamlit as st
-import pandas as pd
-import json
 import requests
 import os
+import re
+import json
 
-# Function to read insurance plans from local files
-def get_insurance_plans():
-    plans = []
-    data_folder = 'data'  # Assuming your data is in a 'data' folder
-    for filename in os.listdir(data_folder):
-        if filename.endswith('.txt'):
-            plans.append(filename[:-4])  # Remove '.txt' extension
-    return sorted(plans)
+# Hardcoded API key
+API_KEY = 'uForJWJpDMaFpaG56PiVztHxsI9R8IvO'
 
-# Simplified function to read plan details from file
-def read_plan_details(plan_name):
-    file_path = os.path.join('data', f"{plan_name}.txt")
-    try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            return file.read()
-    except UnicodeDecodeError:
-        raise ValueError(f"Unable to read file {file_path} with UTF-8 encoding.")
-
-# Function to call AI21 API (Jamba)
 def call_ai21_api(prompt):
-    if 'AI21_API_KEY' not in st.secrets:
-        st.error("AI21 API key not found in Streamlit secrets.")
-        return None
-
-    api_key = st.secrets['AI21_API_KEY']
-    url = 'https://api.ai21.com/studio/v1/j2-jumbo-instruct/complete'
+    url = 'https://api.ai21.com/studio/v1/chat/completions'
     headers = {
-        'Authorization': f'Bearer {api_key}',
+        'Authorization': f'Bearer {API_KEY}',
         'Content-Type': 'application/json'
     }
     data = {
-        "prompt": prompt,
-        "numResults": 1,
-        "maxTokens": 5000,
-        "temperature": 0.3,
-        "topKReturn": 0,
-        "topP": 1,
-        "countPenalty": {
-            "scale": 0,
-            "applyToNumbers": False,
-            "applyToPunctuations": False,
-            "applyToStopwords": False,
-            "applyToWhitespaces": False,
-            "applyToEmojis": False
-        },
-        "frequencyPenalty": {
-            "scale": 0,
-            "applyToNumbers": False,
-            "applyToPunctuations": False,
-            "applyToStopwords": False,
-            "applyToWhitespaces": False,
-            "applyToEmojis": False
-        },
-        "presencePenalty": {
-            "scale": 0,
-            "applyToNumbers": False,
-            "applyToPunctuations": False,
-            "applyToStopwords": False,
-            "applyToWhitespaces": False,
-            "applyToEmojis": False
-        },
-        "stopSequences": []
+        "model": "jamba-1.5-large",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 2048,
+        "temperature": 0.4,
+        "top_p": 1
     }
-
     try:
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
@@ -76,82 +28,102 @@ def call_ai21_api(prompt):
         st.error(f"Error calling AI21 API: {e}")
         return None
 
-# Main app
+def clean_text(text):
+    text = re.sub(r'[®©™]', '', text)
+    text = re.sub(r'[^\x00-\x7F]+', '', text)
+    return text
+
+def read_file(file_path):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        content = file.read()
+    return clean_text(content)
+
+def generate_prompt_template(selected_files, question):
+    prompt_template = "#################################\n"
+    for i, file in enumerate(selected_files, 1):
+        file_path = os.path.join('./data', file)
+        file_content = read_file(file_path)
+        plan_name = os.path.splitext(file)[0]
+        
+        prompt_template += f"PLAN: {plan_name}\n"
+        prompt_template += f"PLANDETAILS: {file_content}\n"
+        prompt_template += "#################################\n\n"
+    
+    if question:
+        prompt_template += "#################################\nCOMPARE THE ABOVE HEALTHCARE PLANS AND ANSWER THIS QUESTION:\n"
+        prompt_template += clean_text(question)
+    
+    return prompt_template
+
+def escape_markdown(text):
+    chars_to_escape = ['$', '*', '_', '[', ']', '(', ')', '#', '+', '-', '.', '!']
+    for char in chars_to_escape:
+        text = text.replace(char, '\\' + char)
+    return text
+
 def main():
-    st.title("Insurance Plan Comparison with AI21 Jamba")
+    st.title("Integrated AI21 API and Prompt Template Generator")
 
-    st.write("""
-    Welcome to the Insurance Plan Comparison App! This tool empowers you to compare various healthcare plans using detailed plan information loaded from local files. With the help of the AI21 Jamba model, you can pose specific questions to guide your decision-making process.
-    """)
+    # Prompt Template Generator Section
+    st.header("Prompt Template Generator")
+    
+    data_folder = './data'
+    txt_files = [f for f in os.listdir(data_folder) if f.endswith('.txt')]
+    
+    selected_files = st.multiselect("Select up to 2 files", txt_files, max_selections=2)
+    question = st.text_area("Enter your question for plan comparison")
+    
+    if selected_files:
+        prompt_template = generate_prompt_template(selected_files, question)
+        st.text_area("Generated Prompt Template", prompt_template, height=200)
+        st.session_state.generated_prompt = prompt_template
 
-    # Get all available plans
-    all_plans = get_insurance_plans()
-
-    # Allow user to select up to 2 plans
-    selected_plans = st.multiselect("Select up to 2 plans to compare:", all_plans, max_selections=2)
-
-    # Pre-canned questions
-    pre_canned_questions = [
-        "I need an in-patient procedure, help me choose which plan is best for me?",
-        "Which healthcare plan should I choose between these 2?",
-        "How much would I pay out of pocket to see my PCP every year?",
-        "I have a large family with 4 dependents. Which plan is right for me?",
-        "How much prescription coverage is paid for by each of these plans?",
-        "I am over 18 years old and the only person who would be covered by my insurance. Is vision covered by these insurance plans?",
-        "Custom question"
-    ]
-
-    # Dropdown for pre-canned questions
-    selected_question = st.selectbox("Select a pre-canned question or choose 'Custom question':", pre_canned_questions)
-
-    # Text input for user's question
-    if selected_question == "Custom question":
-        question = st.text_input("Enter your custom question about the selected plans:")
+    # AI21 API Section
+    st.header("AI21 API Response")
+    
+    use_generated_prompt = st.checkbox("Use generated prompt", value=bool(st.session_state.get('generated_prompt', '')))
+    
+    if use_generated_prompt and 'generated_prompt' in st.session_state:
+        user_prompt = st.session_state.generated_prompt
+        st.text_area("Prompt to be sent", user_prompt, height=100)
     else:
-        question = st.text_input("Question about the selected plans:", value=selected_question)
+        user_prompt = st.text_area("Enter your prompt:", height=100)
 
-    # Button to run the comparison
-    if st.button('Compare Plans') and len(selected_plans) > 0:
-        with st.spinner("Analyzing plans..."):
-            # Prepare prompt with plan details
-            plan_details = []
-            for plan in selected_plans:
-                try:
-                    details = read_plan_details(plan)
-                    plan_details.append(f"Plan: {plan}\nDetails: {details}\n")
-                except ValueError as e:
-                    st.error(str(e))
-                    continue
-            
-            if not plan_details:
-                st.error("Unable to read details for any of the selected plans.")
-                return
-
-            prompt = f"Question: {question}\n\nPlan Information:\n{''.join(plan_details)}\nPlease compare these plans and answer the question."
-            
-            # Call AI21 API
-            response = call_ai21_api(prompt)
-            
-            if response:
-                try:
-                    # Extract the message content from the nested structure
-                    if 'completions' in response and len(response['completions']) > 0:
-                        message = response['completions'][0]['data']['text']
+    if st.button("Get AI Response"):
+        if not user_prompt:
+            st.warning("Please enter a prompt or generate one using the Prompt Template Generator.")
+        else:
+            with st.spinner("Generating response..."):
+                response = call_ai21_api(user_prompt)
+                
+                if response:
+                    try:
+                        if 'choices' in response and len(response['choices']) > 0:
+                            choice = response['choices'][0]
+                            if 'message' in choice:
+                                message = choice['message']['content']
+                            elif 'messages' in choice:
+                                message = choice['messages']
+                            elif 'mesages' in choice:  # Handle potential typo in key name
+                                message = choice['mesages']
+                            else:
+                                message = str(choice)  # Fallback: convert the entire choice to string
+                        else:
+                            message = str(response)  # Fallback: convert the entire response to string
+                        
                         st.subheader("AI Response:")
-                        st.write(message)
-                    else:
-                        st.error("Unexpected response structure from AI21 API")
-                    
-                    # Add button to view full response JSON
-                    with st.expander('View Full API Response'):
+                        escaped_message = escape_markdown(message)
+                        st.write(escaped_message)
+                        
+                        # Option to view full API response
+                        with st.expander("View Full Response"):
+                            st.json(response)
+                    except KeyError as e:
+                        st.error(f"Failed to parse response: {e}")
                         st.json(response)
-                    
-                except KeyError as e:
-                    st.error(f"Failed to parse response: {e}")
-                    st.json(response)
-            else:
-                st.error("No response from AI21 API.")
-        st.success('Comparison complete!')
 
 if __name__ == "__main__":
+    if 'generated_prompt' not in st.session_state:
+        st.session_state.generated_prompt = ""
+    
     main()
