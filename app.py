@@ -16,8 +16,8 @@ def call_ai21_api(prompt):
     data = {
         "model": "jamba-1.5-large",
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 5000,
-        "temperature": 0.3,
+        "max_tokens": 2048,
+        "temperature": 0.4,
         "top_p": 1
     }
     try:
