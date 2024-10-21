@@ -36,9 +36,10 @@ def call_ai21_api(prompt):
         st.write("Full API Response:")
         st.json(response_json)
         
-        # Try to extract the response text
-        if 'outputs' in response_json and len(response_json['outputs']) > 0:
-            return response_json['outputs'][0].get('text', 'No text found in response')
+        # Extract the response text from the correct location in the JSON
+        if 'choices' in response_json and len(response_json['choices']) > 0:
+            message = response_json['choices'][0].get('message', {})
+            return message.get('content', 'No content found in response')
         else:
             st.error("Unexpected response structure from AI21 API")
             return None
