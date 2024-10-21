@@ -30,9 +30,26 @@ def call_ai21_api(prompt):
     try:
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
-        return response.json()['outputs'][0]['text']
+        response_json = response.json()
+        
+        # Log the full response for debugging
+        st.write("Full API Response:")
+        st.json(response_json)
+        
+        # Try to extract the response text
+        if 'outputs' in response_json and len(response_json['outputs']) > 0:
+            return response_json['outputs'][0].get('text', 'No text found in response')
+        else:
+            st.error("Unexpected response structure from AI21 API")
+            return None
     except requests.exceptions.RequestException as e:
         st.error(f"Error calling AI21 API: {e}")
+        return None
+    except json.JSONDecodeError:
+        st.error("Error decoding JSON response from AI21 API")
+        return None
+    except Exception as e:
+        st.error(f"Unexpected error: {e}")
         return None
 
 def main():
