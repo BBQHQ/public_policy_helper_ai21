@@ -4,8 +4,8 @@ import os
 import re
 import json
 
-# Hardcoded API key
-API_KEY = 'uForJWJpDMaFpaG56PiVztHxsI9R8IvO'
+# Access the API key from Streamlit secrets
+API_KEY = st.secrets["AI21_API_KEY"]
 
 def call_ai21_api(prompt):
     url = 'https://api.ai21.com/studio/v1/chat/completions'
