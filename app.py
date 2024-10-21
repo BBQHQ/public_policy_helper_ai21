@@ -13,16 +13,14 @@ def get_insurance_plans():
             plans.append(filename[:-4])  # Remove '.txt' extension
     return sorted(plans)
 
-# Function to read plan details from file using UTF-8 encoding
+# Simplified function to read plan details from file
 def read_plan_details(plan_name):
     file_path = os.path.join('data', f"{plan_name}.txt")
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             return file.read()
     except UnicodeDecodeError:
-        # If UTF-8 decoding fails, use error handler to replace problematic characters
-        with open(file_path, 'r', encoding='utf-8', errors='replace') as file:
-            return file.read()
+        raise ValueError(f"Unable to read file {file_path} with UTF-8 encoding.")
 
 # Function to call AI21 API (Jamba)
 def call_ai21_api(prompt):
@@ -31,22 +29,43 @@ def call_ai21_api(prompt):
         return None
 
     api_key = st.secrets['AI21_API_KEY']
-    url = 'https://api.ai21.com/studio/v1/chat/completions'
+    url = 'https://api.ai21.com/studio/v1/j2-jumbo-instruct/complete'
     headers = {
-        'Content-type': 'application/json',
-        'Authorization': f'Bearer {api_key}'
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json'
     }
     data = {
-        "model": "jamba-1.5-large",
-        "messages": [{"role": "user", "content": prompt}],
-        "documents": [],
-        "tools": [],
-        "n": 1,
-        "max_tokens": 5000,
+        "prompt": prompt,
+        "numResults": 1,
+        "maxTokens": 5000,
         "temperature": 0.3,
-        "top_p": 1,
-        "stop": [],
-        "response_format": {"type": "text"},
+        "topKReturn": 0,
+        "topP": 1,
+        "countPenalty": {
+            "scale": 0,
+            "applyToNumbers": False,
+            "applyToPunctuations": False,
+            "applyToStopwords": False,
+            "applyToWhitespaces": False,
+            "applyToEmojis": False
+        },
+        "frequencyPenalty": {
+            "scale": 0,
+            "applyToNumbers": False,
+            "applyToPunctuations": False,
+            "applyToStopwords": False,
+            "applyToWhitespaces": False,
+            "applyToEmojis": False
+        },
+        "presencePenalty": {
+            "scale": 0,
+            "applyToNumbers": False,
+            "applyToPunctuations": False,
+            "applyToStopwords": False,
+            "applyToWhitespaces": False,
+            "applyToEmojis": False
+        },
+        "stopSequences": []
     }
 
     try:
@@ -59,12 +78,10 @@ def call_ai21_api(prompt):
 
 # Main app
 def main():
-    st.title("Insurance Plan Comparison with Jamba-1.5-Large")
+    st.title("Insurance Plan Comparison with AI21 Jamba")
 
     st.write("""
-    Welcome to the Insurance Plan Comparison App! This tool empowers you to compare various healthcare plans using detailed plan information loaded from local files. With the help of the Jamba-1.5-Large model, you can pose specific questions to guide your decision-making process. Whether your focus is on out-of-pocket costs, prescription coverage, or options for families, this app facilitates the comparison of up to two plans simultaneously!
-
-    For more information about specific plans, you can access the [coverage policy documents here](https://www.bluecrossma.org/myblue/learn-and-save/plans-and-benefits/coverage-policy-documents).
+    Welcome to the Insurance Plan Comparison App! This tool empowers you to compare various healthcare plans using detailed plan information loaded from local files. With the help of the AI21 Jamba model, you can pose specific questions to guide your decision-making process.
     """)
 
     # Get all available plans
@@ -72,11 +89,6 @@ def main():
 
     # Allow user to select up to 2 plans
     selected_plans = st.multiselect("Select up to 2 plans to compare:", all_plans, max_selections=2)
-
-    st.write("""
-    Below, you can select one of the pre-canned questions or enter your own custom question. 
-    The app uses this question to analyze the selected plans and provide a tailored response.
-    """)
 
     # Pre-canned questions
     pre_canned_questions = [
@@ -92,19 +104,11 @@ def main():
     # Dropdown for pre-canned questions
     selected_question = st.selectbox("Select a pre-canned question or choose 'Custom question':", pre_canned_questions)
 
-    st.markdown("---")
-    st.header("HC Plan Comparison Question")
-
     # Text input for user's question
     if selected_question == "Custom question":
         question = st.text_input("Enter your custom question about the selected plans:")
     else:
         question = st.text_input("Question about the selected plans:", value=selected_question)
-
-    st.write("""
-    The model response will appear below, offering detailed comparisons based on your selected question and plans. 
-    You can expand the 'View Full Response' section to see the complete model output in JSON format.
-    """)
 
     # Button to run the comparison
     if st.button('Compare Plans') and len(selected_plans) > 0:
@@ -114,16 +118,16 @@ def main():
             for plan in selected_plans:
                 try:
                     details = read_plan_details(plan)
-                    plan_details.append(f'<plan name="{plan}">{details}</plan>')
-                except Exception as e:
-                    st.error(f"Error reading details for plan '{plan}': {str(e)}")
+                    plan_details.append(f"Plan: {plan}\nDetails: {details}\n")
+                except ValueError as e:
+                    st.error(str(e))
                     continue
             
             if not plan_details:
                 st.error("Unable to read details for any of the selected plans.")
                 return
 
-            prompt = f"{question}\n\n{''.join(plan_details)}"
+            prompt = f"Question: {question}\n\nPlan Information:\n{''.join(plan_details)}\nPlease compare these plans and answer the question."
             
             # Call AI21 API
             response = call_ai21_api(prompt)
@@ -131,27 +135,23 @@ def main():
             if response:
                 try:
                     # Extract the message content from the nested structure
-                    if 'choices' in response and len(response['choices']) > 0:
-                        message = response['choices'][0]['message']['content']
+                    if 'completions' in response and len(response['completions']) > 0:
+                        message = response['completions'][0]['data']['text']
+                        st.subheader("AI Response:")
+                        st.write(message)
                     else:
-                        message = str(response)  # Fallback: convert the entire response to string
-                    
-                    st.subheader("Model Response:")
-                    st.write(message)
+                        st.error("Unexpected response structure from AI21 API")
                     
                     # Add button to view full response JSON
-                    with st.expander('View Full Response'):
+                    with st.expander('View Full API Response'):
                         st.json(response)
                     
                 except KeyError as e:
                     st.error(f"Failed to parse response: {e}")
                     st.json(response)
             else:
-                st.error("No response from Jamba-1.5-Large.")
+                st.error("No response from AI21 API.")
         st.success('Comparison complete!')
-    
-    st.markdown("---")
-    st.write("Note: This app uses the Jamba-1.5-Large model to analyze insurance plans. The app makes a single call to Jamba with concatenated plan details for efficient comparison.")
 
 if __name__ == "__main__":
     main()
